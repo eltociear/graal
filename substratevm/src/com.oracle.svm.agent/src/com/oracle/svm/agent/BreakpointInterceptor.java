@@ -152,8 +152,8 @@ final class BreakpointInterceptor {
         if (tracer != null) {
             tracer.traceCall("reflect",
                             function,
-                            getClassNameOr(env, clazz, null, Tracer.UNKNOWN_VALUE),
-                            getClassNameOr(env, declaringClass, null, Tracer.UNKNOWN_VALUE),
+                            getClassOrSingleProxyInterfaceNameOr(env, clazz, null, Tracer.UNKNOWN_VALUE),
+                            getClassOrSingleProxyInterfaceNameOr(env, declaringClass, null, Tracer.UNKNOWN_VALUE),
                             getClassNameOr(env, callerClass, null, Tracer.UNKNOWN_VALUE),
                             result,
                             stackTrace,
@@ -1404,6 +1404,49 @@ final class BreakpointInterceptor {
         }
         guarantee(!testException(jni) && method.isNonNull());
         return method;
+    }
+
+    private static String getClassOrSingleProxyInterfaceNameOr(JNIEnvironment env, JNIObjectHandle clazz, String forNullHandle, String forNullNameOrException) {
+        /*
+         * To avoid outputting the names of proxies (which are unique to a program execution) in
+         * the configuration, we return the name of the interface they implement instead.
+         */
+        JNIObjectHandle singleProxyInterface = getSingleProxyInterface(env, clazz);
+        JNIObjectHandle clazzNameProvider = singleProxyInterface.notEqual(nullHandle()) ? singleProxyInterface : clazz;
+        return Support.getClassNameOr(env, clazzNameProvider, forNullHandle, forNullNameOrException);
+    }
+
+    /**
+     * If the given class is a proxy implementing a single interface, returns this interface. This
+     * prevents classes with arbitrary names from being exposed outside the agent, since those names
+     * only make sense within a single execution of the program.
+     *
+     * @param env JNI environment of the thread running the JVMTI callback.
+     * @param clazz Handle to the class.
+     * @return The interface, or a null handle if the class is not a proxy or implements multiple
+     *         interfaces.
+     */
+    public static JNIObjectHandle getSingleProxyInterface(JNIEnvironment env, JNIObjectHandle clazz) {
+        boolean isProxy = Support.callStaticBooleanMethodL(env, agent.handles().getJavaLangReflectProxy(env), agent.handles().getJavaLangReflectProxyIsProxyClass(env), clazz);
+        if (Support.clearException(env) || !isProxy) {
+            return nullHandle();
+        }
+
+        JNIObjectHandle interfaces = Support.callObjectMethod(env, clazz, agent.handles().javaLangClassGetInterfaces);
+        if (Support.clearException(env) || interfaces.equal(nullHandle())) {
+            return nullHandle();
+        }
+
+        int interfacesLength = Support.jniFunctions().getGetArrayLength().invoke(env, interfaces);
+        guarantee(!Support.clearException(env));
+        if (interfacesLength != 1) {
+            return nullHandle();
+        }
+
+        JNIObjectHandle iface = Support.jniFunctions().getGetObjectArrayElement().invoke(env, interfaces, 0);
+        guarantee(!Support.clearException(env) && iface.notEqual(nullHandle()));
+
+        return iface;
     }
 
     public static void onUnload() {
