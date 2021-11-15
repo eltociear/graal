@@ -53,6 +53,8 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import com.oracle.graal.pointsto.BigBang;
+import com.oracle.graal.pointsto.ReachabilityAnalysis;
 import org.graalvm.collections.EconomicMap;
 import org.graalvm.collections.MapCursor;
 import org.graalvm.compiler.api.replacements.SnippetReflectionProvider;
@@ -115,7 +117,6 @@ import org.graalvm.nativeimage.impl.ConfigurationCondition;
 import org.graalvm.word.Pointer;
 import org.graalvm.word.WordFactory;
 
-import com.oracle.graal.pointsto.flow.InvokeTypeFlow;
 import com.oracle.graal.pointsto.meta.AnalysisMethod;
 import com.oracle.graal.pointsto.meta.AnalysisUniverse;
 import com.oracle.svm.core.OS;
@@ -551,6 +552,7 @@ public final class LibGraalFeature implements com.oracle.svm.core.graal.GraalFea
      */
     private static void verifyReachableTruffleClasses(AfterAnalysisAccess access) {
         AnalysisUniverse universe = ((FeatureImpl.AfterAnalysisAccessImpl) access).getUniverse();
+        BigBang bb = universe.getBigbang();
         Set<AnalysisMethod> seen = new HashSet<>();
         universe.getMethods().stream().filter(AnalysisMethod::isRootMethod).forEach(seen::add);
         Deque<AnalysisMethod> todo = new ArrayDeque<>(seen);
@@ -561,8 +563,8 @@ public final class LibGraalFeature implements com.oracle.svm.core.graal.GraalFea
             if (!isAllowedType(className)) {
                 disallowedTypes.add(className);
             }
-            for (InvokeTypeFlow invoke : m.getTypeFlow().getInvokes()) {
-                for (AnalysisMethod callee : invoke.getCallees()) {
+            for (ReachabilityAnalysis.InvokeInfo invoke : bb.getInvokes(m)) {
+                for (AnalysisMethod callee : invoke.getPossibleCallees()) {
                     if (seen.add(callee)) {
                         todo.add(callee);
                     }
